@@ -1,0 +1,254 @@
+{
+  "AWSTemplateFormatVersion":"2010-09-09",
+  "Description":"testing of star dust.",
+  "Parameters": {
+    "ClusterStackName": {
+      "Description": "Name of an active CloudFormation stack that contains an ECS cluster",
+      "Type": "String",
+      "MinLength": 1,
+      "MaxLength": 255,
+      "AllowedPattern": "^[a-zA-Z][-a-zA-Z0-9]*$",
+      "Default": "lab-services-stack"
+    },
+    "Environment": {
+      "Description": "Type of environment",
+      "Type": "String",
+      "AllowedValues": [
+        "dev",
+        "int",
+        "load",
+        "uat",
+        "sandbox",
+        "pre-prod",
+        "prod"
+      ],
+      "Default": "dev"
+    },
+    "Path": "/starDust",
+    "Priority": 978,
+    "AppName": "starDust",
+    "AppVersion": {
+      "Type": "String",
+      "Description": "Version label of app"
+    },
+    "AppContainerPort": {
+      "Type": "Number",
+      "Description": "Port the app runs on in the image",
+      "Default": "8080"
+    },
+    "ImageRepository": {
+      "Type": "String",
+      "Description": "The URI of the image repository where the app is published. Do not include app name in URI.",
+      "Default": "368057246517.dkr.ecr.us-east-1.amazonaws.com"
+    },
+    "Memory": {
+      "Type": "Number",
+      "Description": "Soft memory on container",
+      "Default": "1024"
+    },
+    "Cpu": {
+      "Type": "Number",
+      "Description": "cpu unites on container",
+      "Default": "100"
+    },
+    "AppDesiredCount": {
+      "Type": "Number",
+      "Description": "Number of instances of the service to run",
+      "Default": "1"
+    },
+    "AppMaxCount": {
+      "Type": "Number",
+      "Description": "Max number of instances of the service to scale out to",
+      "Default": "1"
+    },
+    "AppMinCount": {
+      "Type": "Number",
+      "Description": "Min number of instances of the service to scale in to",
+      "Default": "1"
+    },
+    "MemoryHighThreshold": {
+      "Type": "Number",
+      "Description": "Percentage of service memory utilization that is considered high",
+      "Default": "60"
+    },
+    "CPUHighThreshold": {
+      "Type": "Number",
+      "Description": "Percentage of service cpu utilization that is considered high",
+      "Default": "60"
+    },
+    "JvmXmsMemory": {
+      "Type": "Number",
+      "Description": "Jvm Xms Memory",
+      "Default": "1024"
+    },
+    "JvmXmxMemory": {
+      "Type": "Number",
+      "Description": "Jvm Xmx Memory",
+      "Default": "1024"
+    },
+    "LogRetention": {
+      "Type": "Number",
+      "Description": "Number of days to retain logs in CWL",
+      "Default": "14"
+    },
+    "KmsKey": {
+      "Type": "String",
+      "Description": "The ARN of a KMS CMK to use to decrypt secure environment variables"
+    },
+    "MinimumHealthyPercent": {
+      "Type": "Number",
+      "Description": "Minimum percent of health",
+      "Default": "0"
+    },
+    "MaximumPercent": {
+      "Type": "Number",
+      "Description": "Maximum percent of health",
+      "Default": "100"
+    }
+  },
+  "Resources":{
+
+    "TaskDefinition": {
+      "Type": "AWS::ECS::TaskDefinition",
+      "Properties": {
+        "ContainerDefinitions": [{
+          "Name": {
+            "Ref": "AppName"
+          },
+          "Image": {
+            "Fn::Sub": "${ImageRepository}/${AppName}:${AppVersion}"
+          },
+          "Cpu": {
+            "Ref": "Cpu"
+          },
+          "PortMappings": [{
+            "ContainerPort": {
+              "Ref": "AppContainerPort"
+            },
+            "HostPort": 0
+          }],
+          "Environment" : [{
+            "Name" : "FIN_JAVA_OPTS",
+            "Value" : { "Fn::Sub" : " -Xms${JvmXmsMemory}m  -Xmx${JvmXmxMemory}m -XX:+HeapDumpOnOutOfMemoryError " }
+          }],
+          "Command": [
+            {
+              "Fn::Sub": "-J-Xms${JvmXmsMemory}m"
+            },
+            {
+              "Fn::Sub": "-J-Xmx${JvmXmxMemory}m"
+            },
+            "-J-XX:+HeapDumpOnOutOfMemoryError"
+          ,
+            {
+              "Fn::Sub": "--server.servlet.context-path=${Path}"
+            }
+          ],
+          "MemoryReservation": {
+            "Ref": "Memory"
+          },
+          "Essential": "true"
+        }],
+        "Volumes": [],
+        "Family": {
+          "Ref": "AWS::StackName"
+        }
+      }
+    },
+    "Service": {
+      "Type": "AWS::ECS::Service",
+      "Properties": {
+        "ServiceName": {
+          "Ref": "AWS::StackName"
+        },
+        "Role": {
+          "Fn::ImportValue": {
+            "Fn::Sub": "${ClusterStackName}-EcsServiceRole"
+          }
+        },
+        "TaskDefinition": {
+          "Ref": "TaskDefinition"
+        },
+        "DesiredCount": {
+          "Ref": "AppDesiredCount"
+        },
+        "Cluster": {
+          "Fn::ImportValue": {
+            "Fn::Sub": "${ClusterStackName}-ClusterName"
+          }
+        },
+        "PlacementStrategies": [
+          {
+            "Field": "attribute:ecs.availability-zone",
+            "Type": "spread"
+          },
+          {
+            "Field": "instanceId",
+            "Type": "spread"
+          }
+        ],
+        "DeploymentConfiguration": {
+          "MinimumHealthyPercent": {
+            "Ref": "MinimumHealthyPercent"
+          },
+          "MaximumPercent": {
+            "Ref": "MaximumPercent"
+          }
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "Service": {
+      "Description": "The name of the ECS service created",
+      "Value": {
+        "Fn::GetAtt": ["Service", "Name"]
+      },
+      "Export": {
+        "Name": {
+          "Fn::Sub": "${AWS::StackName}-ServiceName"
+        }
+      }
+    },
+    "TaskFamily": {
+      "Description": "The family of the task created for the service",
+      "Value": {
+        "Ref": "AWS::StackName"
+      }
+    },
+    "TaskArn": {
+      "Description": "The ARN of the task created for the service",
+      "Value": {
+        "Ref": "TaskDefinition"
+      }
+    },
+    "ServiceDNS": {
+      "Description": "The dns name of the app load balancer for the service",
+      "Value": {
+        "Fn::Join": ["", [{
+          "Fn::ImportValue": {
+            "Fn::Sub": "${ClusterStackName}-LoadBalancerDNSName"
+          }
+        }, {
+          "Ref": "Path"
+        }]
+
+        ]
+      },
+      "Export": {
+        "Name": {
+          "Fn::Sub": "${AWS::StackName}-LoadBalancerDNSName"
+        }
+      }
+    },
+
+      "Export": {
+        "Name": {
+          "Fn::Sub": "${AWS::StackName}-LogGroupName"
+        }
+      }
+    }
+
+
+
+}

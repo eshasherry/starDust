@@ -1,0 +1,20 @@
+
+pipeline {
+
+    agent none
+
+    stages {
+        stage('Build & Test') {
+            agent {
+
+                label 'general'
+            }
+            steps {
+
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'dev-aws-deployer'], sshUserPrivateKey(credentialsId: 'jenkins-ssh-key', keyFileVariable: 'mySecretLocationForSSHKey')]) {
+                                    sh 'scripts/jenkins-release.sh'
+                                }
+            }
+        }
+    }
+}
